@@ -1,67 +1,80 @@
 import cv2
 import mediapipe as mp
 import time
+import numpy as np
 
-class handDetector():
-    def __init__(self,mode = False,maxHands = 2,comp = 1,detectionCon = 0.5,trackCon = 0.5): # 这里由于函数库更新，所以多了一个复杂度参数，默认设为1
+class HandDetector:
+    def __init__(self, mode=False, max_hands=2, model_complexity=1, detection_con=0.5, track_con=0.5):
         self.mode = mode
-        self.maxHands = maxHands
-        self.comp = comp
-        self.detectionCon = detectionCon
-        self.trackCon = trackCon
+        self.max_hands = max_hands
+        self.model_complexity = model_complexity
+        self.detection_con = detection_con
+        self.track_con = track_con
 
-        # 导入mediapipe手部识别函数
-        self.mpHands = mp.solutions.hands  # type: ignore
-        self.hands = self.mpHands.Hands(self.mode,self.maxHands,self.comp,
-                                        self.detectionCon,self.trackCon)
-        self.mpDraw = mp.solutions.drawing_utils  # type: ignore
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=self.mode,
+            max_num_hands=self.max_hands,
+            model_complexity=self.model_complexity,
+            min_detection_confidence=self.detection_con,
+            min_tracking_confidence=self.track_con
+        )
+        self.mp_draw = mp.solutions.drawing_utils
+        self.hand_lm_style = self.mp_draw.DrawingSpec(color=(0, 0, 255), thickness=5)
+        self.hand_con_style = self.mp_draw.DrawingSpec(color=(0, 255, 0), thickness=3)
 
-        self.handLmStyle = self.mpDraw.DrawingSpec(color=(0, 0, 255), thickness=5)  # 点的样式，前一个参数是颜色，后一个是粗细
-        self.handConStyle = self.mpDraw.DrawingSpec(color=(0, 255, 0), thickness=3)  # 线的样式BGR，前一个参数是颜色，后一个是粗细
-        
-    def findHands(self,img,draw = True):
-        imgRGB = cv2.cvtColor(img,cv2.COLOR_BGR2RGB) # 将图像转化为RGB图像
-        self.results = self.hands.process(imgRGB)
+    def find_hands(self, img, draw=True):
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        self.results = self.hands.process(img_rgb)
 
-        if self.results.multi_hand_landmarks:
-            for handLms in self.results.multi_hand_landmarks:
-                if draw:
-                    # self.mpDraw.draw_landmarks(img, handLms, self.mpHands.HAND_CONNECTIONS)
-                    self.mpDraw.draw_landmarks(img, handLms, self.mpHands.HAND_CONNECTIONS, self.handLmStyle, self.handConStyle)  # 画出点和线
+        if self.results.multi_hand_landmarks and draw:
+            for hand_lms in self.results.multi_hand_landmarks:
+                self.mp_draw.draw_landmarks(
+                    img, hand_lms, self.mp_hands.HAND_CONNECTIONS,
+                    self.hand_lm_style, self.hand_con_style
+                )
         return img
-    def findPosition(self,img,handNo = 0,draw = True):
-        lmlist = []
+
+    def find_position(self, img, hand_no=0, draw=True):
+        lm_list = []
         if self.results.multi_hand_landmarks:
-            myHand = self.results.multi_hand_landmarks[handNo]
-            for id, lm in enumerate(myHand.landmark):
-                # print(id,lm)
-                h, w, c = img.shape  # 得到图像的长宽以及通道数
-                cx, cy = int(lm.x * w), int(lm.y * h)  # 计算出中心点位置
-                # print(id, cx, cy)
-                lmlist.append([id,cx,cy])
-                if id == 0:
+            my_hand = self.results.multi_hand_landmarks[hand_no]
+            for id, lm in enumerate(my_hand.landmark):
+                h, w, _ = img.shape
+                cx, cy = int(lm.x * w), int(lm.y * h)
+                lm_list.append([id, cx, cy])
+                if id == 0 and draw:
                     cv2.circle(img, (cx, cy), 15, (0, 0, 255), cv2.FILLED)
-        return lmlist
+        return lm_list
 
 def main():
-    pTime = 0
-    cTime = 0
-    cap = cv2.VideoCapture(0)  # 捕获摄像头
-    detector = handDetector()
+    cap = cv2.VideoCapture(0)
+    detector = HandDetector()
+    prev_time = 0
+
     while True:
-        success, img = cap.read()  # 读入每一帧图像
-        img = detector.findHands(img)
-        limist = detector.findPosition(img)
-        if len(limist) != 0:
-            print(limist[4])
-        cTime = time.time() # 用于计算FPS
-        fps = 1/(cTime-pTime)
-        pTime = cTime
-        cv2.putText(img,f"FPS:{int(fps)}",(10,70),cv2.FONT_HERSHEY_PLAIN,3,(255,0,0),3) # 在图像上画出实时FPS
-        # print(results.multi_hand_landmarks)
-        cv2.namedWindow('Image', 0)
-        cv2.resizeWindow('Image', 500, 400)
-        cv2.imshow("Image",img) # 展示图像
-        cv2.waitKey(1) # 延迟1ms
+        success, img = cap.read()
+        if not success:
+            break
+
+        img = detector.find_hands(img)
+        lm_list = detector.find_position(img)
+
+        if lm_list:
+            print(lm_list[4])
+
+        current_time = time.time()
+        fps = 1 / (current_time - prev_time)
+        prev_time = current_time
+
+        cv2.putText(img, f"FPS: {int(fps)}", (10, 70), cv2.FONT_HERSHEY_PLAIN, 3, (255, 0, 0), 3)
+
+        cv2.imshow("Image", img)
+        if cv2.waitKey(1) & 0xFF == 27:  # ESC key to exit
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
 if __name__ == "__main__":
     main()
